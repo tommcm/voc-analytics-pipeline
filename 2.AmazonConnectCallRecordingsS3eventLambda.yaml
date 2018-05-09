@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "An example job status poller template."
+Parameters: 
+  stateMachineArnParameter: 
+    Type: String
+    Default: arn:aws:states:us-east-1:708252083442:stateMachine:TranscribeJobStatusPollerSt-1oHfEwYAgrz7
+    Description: Enter the ARN of the created Amazon Transcribe Job Submit Job State Machine
+  stateMachineExecutionNamePrefixParameter: 
+      Type: String
+      Default: AmazonConnect
+      Description: Prefix to be used when creating a SF execution
+  waitTimeParameter: 
+      Type: String
+      Default: 5
+      Description: Enter the ARN of the created Amazon Transcribe Job Submit Job State Machine
+  AmazonConnectInstanceAliasParameter:
+      Type: String
+      Default: sydney-summit
+      Description: Enter the name of Amazon Connect Instance Alias (created manually as prereq)
+
+Resources:
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        -
+          PolicyName: "AdminAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: "*"
+                Resource: "*"
+
+  AmazonConnectCallRecordingsS3events:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-CallRecordingtoSF'
+      Description: Task to attempt to submit an execution to state machine
+      # Handler: "lambda_function.lambda_handler"
+      Handler: "index.lambda_handler"
+      Role: !GetAtt [ LambdaExecutionRole, Arn ]
+      Code:
+        ZipFile: |
+          
+          import json
+          import os
+          import urllib
+          import boto3
+          import datetime
+
+          print('Loading function')
+
+          stepfunctions = boto3.client('stepfunctions')
+
+          def lambda_handler(event, context):
+
+              bucket = event['Records'][0]['s3']['bucket']['name']
+              # key = event['Records'][0]['s3']['object']['key']
+              key = urllib.unquote_plus(event['Records'][0]['s3']['object']['key'].encode('utf8'))
+              stateMachineArn = os.environ['stateMachineArn']
+              stateMachineExecutionNamePrefix = os.environ['stateMachineExecutionNamePrefix']
+              waittime = os.environ['waittime']
+              
+              timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+              
+              recordingFilename = key.split('/')[-1]
+              
+              sf_input = {}
+              sf_input['waittime'] = waittime
+              sf_input['bucket'] = bucket
+              sf_input['key'] = key
+              
+              try:
+                  response = stepfunctions.start_execution(
+                  stateMachineArn=stateMachineArn,
+                  name=stateMachineExecutionNamePrefix + '_' + timestamp + '_' + recordingFilename.split('_')[0],
+                  input= json.dumps(sf_input)
+              )
+                  return
+                  
+              except Exception as e:
+                  print(e)
+                  print('Error getting object {} from bucket {}. Make sure they exist and your bucket is in the same region as this function.'.format(key, bucket))
+                  raise e
+      Environment:
+        Variables:
+          stateMachineArn: !Ref stateMachineArnParameter
+          stateMachineExecutionNamePrefix: !Ref stateMachineExecutionNamePrefixParameter
+          waittime: !Ref waitTimeParameter
+      Runtime: "python2.7"
+      Timeout: "25"
+
+###### TODO
+  # LambdaInvokePermission:
+  #   Type: 'AWS::Lambda::Permission'
+  #   Properties:
+  #     FunctionName: !GetAtt 
+  #       - AmazonConnectCallRecordingsS3events
+  #       - Arn
+  #     Action: 'lambda:InvokeFunction'
+  #     Principal: s3.amazonaws.com
+  #     SourceArn: !GetAtt 
+  #       - AmazonConnectDataBucket
+  #       - Arn
+
+  AmazonConnectDataBucket:
+      Type: "AWS::S3::Bucket"
+      Properties: 
+        BucketName: !Sub "connect-${AWS::StackName}-${AWS::AccountId}-${AWS::Region}"
+        ####### TODO
+        # NotificationConfiguration:
+        #   LambdaConfigurations:
+        #     -
+        #       Function: !GetAtt AmazonConnectCallRecordingsS3events.Arn
+        #       Event: "s3:ObjectCreated:*"
+        #       Filter:
+        #         S3Key:
+        #           Rules:
+        #             -
+        #               Name: suffix
+        #               Value: .wav
+        #             - 
+        #               Name: prefix
+        #               Value: connect/sydney-summit/CallRecordings  
+
+  S3TranscribeBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref AmazonConnectDataBucket
+      PolicyDocument:
+        Statement:
+          -
+            Action:
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource:
+              Fn::Join:
+                - ""
+                -
+                  - "arn:aws:s3:::"
+                  -
+                    Ref: "AmazonConnectDataBucket"
+                  - "/*"
+            Principal:
+              Service: 
+                - "transcribe.amazonaws.com"
+
