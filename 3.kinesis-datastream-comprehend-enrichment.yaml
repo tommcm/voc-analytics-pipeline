@@ -28,6 +28,7 @@ Resources:
                 Effect: "Allow"
                 Action: "*"
                 Resource: "*"
+
   LambdaComprehendEnricher:
     Type: "AWS::Lambda::Function"
     Properties:
