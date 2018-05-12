@@ -49,48 +49,8 @@ Resources:
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        ZipFile: |
-          
-          import json
-          import os
-          import urllib
-          import boto3
-          import datetime
-
-          print('Loading function')
-
-          stepfunctions = boto3.client('stepfunctions')
-
-          def lambda_handler(event, context):
-
-              bucket = event['Records'][0]['s3']['bucket']['name']
-              # key = event['Records'][0]['s3']['object']['key']
-              key = urllib.unquote_plus(event['Records'][0]['s3']['object']['key'].encode('utf8'))
-              stateMachineArn = os.environ['stateMachineArn']
-              stateMachineExecutionNamePrefix = os.environ['stateMachineExecutionNamePrefix']
-              waittime = os.environ['waittime']
-              
-              timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-              
-              recordingFilename = key.split('/')[-1]
-              
-              sf_input = {}
-              sf_input['waittime'] = waittime
-              sf_input['bucket'] = bucket
-              sf_input['key'] = key
-              
-              try:
-                  response = stepfunctions.start_execution(
-                  stateMachineArn=stateMachineArn,
-                  name=stateMachineExecutionNamePrefix + '_' + timestamp + '_' + recordingFilename.split('_')[0],
-                  input= json.dumps(sf_input)
-              )
-                  return
-                  
-              except Exception as e:
-                  print(e)
-                  print('Error getting object {} from bucket {}. Make sure they exist and your bucket is in the same region as this function.'.format(key, bucket))
-                  raise e
+        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Key: voc-analytics/AmazonConnectCallTranscription_1-0-0.zip
       Environment:
         Variables:
           stateMachineArn: !Ref stateMachineArnParameter
@@ -109,10 +69,10 @@ Resources:
   #     Action: 'lambda:InvokeFunction'
   #     Principal: s3.amazonaws.com
   #     SourceArn: !GetAtt 
-  #       - AmazonConnectDataBucket
+  #       - AmazonConnectCallBucket
   #       - Arn
 
-  AmazonConnectDataBucket:
+  AmazonConnectCallBucket:
       Type: "AWS::S3::Bucket"
       Properties: 
         BucketName: !Sub "connect-${AWS::StackName}-${AWS::AccountId}-${AWS::Region}"
@@ -135,7 +95,7 @@ Resources:
   S3TranscribeBucketPolicy:
     Type: "AWS::S3::BucketPolicy"
     Properties:
-      Bucket: !Ref AmazonConnectDataBucket
+      Bucket: !Ref AmazonConnectCallBucket
       PolicyDocument:
         Statement:
           -
@@ -148,7 +108,7 @@ Resources:
                 -
                   - "arn:aws:s3:::"
                   -
-                    Ref: "AmazonConnectDataBucket"
+                    Ref: "AmazonConnectCallBucket"
                   - "/*"
             Principal:
               Service: 

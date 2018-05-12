@@ -1,5 +1,20 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: "An example job status poller template."
+
+Parameters: 
+  stateMachineExecutionNamePrefixParameter: 
+      Type: String
+      Default: AmazonConnect
+      Description: Prefix to be used when creating a SF execution
+  waitTimeParameter: 
+      Type: String
+      Default: 5
+      Description: Enter the ARN of the created Amazon Transcribe Job Submit Job State Machine
+  AmazonConnectInstanceAliasParameter:
+      Type: String
+      Default: sydney-summit
+      Description: Enter the name of Amazon Connect Instance Alias (created manually as prereq)
+
 Resources:
   LambdaExecutionRole:
     Type: "AWS::IAM::Role"
@@ -21,192 +36,293 @@ Resources:
                 Effect: "Allow"
                 Action: "*"
                 Resource: "*"
-        # - PolicyName: S3ExecutionPolicy
-        #   PolicyDocument:
-        #     Version: "2012-10-17"
-        #     Statement:
-        #       - Effect: Allow
-        #         Action:
-        #           - "S3:*"
-        #         Resource: "*"
+        - PolicyName: S3ExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "S3:*"
+                Resource: "*"
 
   SubmitTranscribeJob:
     Type: "AWS::Lambda::Function"
     Properties:
+      FunctionName: !Sub ${AWS::StackName}-SubmitTranscribeJob          
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-      Code:
-        S3Bucket: "sydneysummit-voc-code"
-        S3Key: "SubmitTranscribeJobLambda.zip"
-        # ZipFile: |
-          
-        #   from __future__ import print_function
-
-        #   import json
-        #   import urllib
-        #   import boto3
-        #   import datetime
-
-        #   print('Loading function')
-
-        #   s3 = boto3.client('s3')
-        #   transcribe = boto3.client('transcribe')
-
-        #   def lambda_handler(event, context):
-        #       # Get the object from the event and show its content type
-        #       bucket = event['bucket']    
-        #       key = event['key']
-              
-        #       try:
-                  
-        #           media_path = "https://s3.amazonaws.com/%s/%s" % (bucket,key)
-
-        #           # extract Call Recording UID to be used as Jobname
-        #           # sample call recording filename '5b7a59b2-f54c-4c3e-9e07-2156df2169c1_20180315T05:57_UTC.wav'
-        #           recordingFilename = key.split('/')[-1]
-        #           contactId = recordingFilename.split('_')[0]
-        #           disconnectTime = recordingFilename.split('_')[1]
-                  
-        #           # jobName = 'AmazonConnectCall_' + recordingFilename.split('_')[0]
-        #           timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        #           jobName = 'AmazonConnect_' + timestamp + '_' + recordingFilename.split('_')[0]
-                  
-        #           print ('INFO Media Path: ' + media_path)
-        #           print ('INFO Jobname: ' + jobName)
-                  
-        #           transcribe_response = transcribe.start_transcription_job(
-        #               TranscriptionJobName=jobName,
-        #               LanguageCode='en-US',
-        #               MediaSampleRateHertz=8000, #Amazon Connect Telephony rate
-        #               MediaFormat='wav',
-        #               Media={
-        #                   'MediaFileUri': media_path
-        #               }
-        #           )
-                  
-        #           print ("INFO Amazon Transcribe Job " + transcribe_response['TranscriptionJob']['TranscriptionJobName'], transcribe_response['TranscriptionJob']['TranscriptionJobStatus'])
-                  
-        #           return {
-        #               'jobName' : jobName,
-        #               'contactId': contactId,
-        #               'disconnectTime': disconnectTime
-        #           }
-                  
-        #       except Exception as e:
-        #           print(e)
-        #           print('Error getting object {} from bucket {}. Make sure they exist and your bucket is in the same region as this function.'.format(key, bucket))
-        #           raise e
-
+        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Key: voc-analytics/SubmitTranscribeJobLambda_1-0-0.zip
       Runtime: "python2.7"
       Timeout: "25"
 
   CheckJobFunction:
     Type: "AWS::Lambda::Function"
     Properties:
+      FunctionName: !Sub ${AWS::StackName}-CheckTranscribeJob      
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        ZipFile: |
-          
-          import json
-          import boto3
-
-          print('Loading function')
-
-          transcribe = boto3.client('transcribe')
-
-          def lambda_handler(event, context):
-
-              # Log the received event
-              print("Received event: " + json.dumps(event, indent=2))
-              jobName = event['jobName']
-              try:
-                  # Query Job Status
-                  print("Checking job status")
-                  response = transcribe.get_transcription_job(TranscriptionJobName=jobName)
-                  # Log response from Amazon Transcribe
-                  # print("Response: " + json.dumps(response, indent=2))
-                  print(response)
-                  # Return the jobStatus
-                  jobStatus = response['TranscriptionJob']['TranscriptionJobStatus']
-                  print("Job status: ", jobStatus)
-                  return jobStatus
-                  
-              except Exception as e:
-                  print(e)
-                  message = 'Error getting job status!!!!'
-                  print(message)
-                  raise Exception(message)
-          
+        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Key: voc-analytics/CheckTranscribeJobLambda_1-0-0.zip        
       Runtime: "python2.7"
       Timeout: "25"
 
   CopyTranscriptJobFunction:
     Type: "AWS::Lambda::Function"
     Properties:
+      FunctionName: !Sub ${AWS::StackName}-CopyTranscriptJob
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        ZipFile: |
-
-            import json
-            import boto3
-            import urllib2
-            import dateutil.parser as parser
-
-            print('Loading function2')
-
-            transcribe = boto3.client('transcribe')
-            s3 = boto3.client('s3')
-
-            def lambda_handler(event, context):
-                
-                print("Received event: " + json.dumps(event, indent=2))
-                jobName = event['guid']['jobName']
-                contactId = event['guid']['contactId']
-                # disconnectTime = event['guid']['disconnectTime']
-                # disconnectTime = parser.parse(event['guid']['disconnectTime']).isoformat()
-                disconnectTime = parser.parse(event['guid']['disconnectTime']).strftime("%Y-%m-%d %H:%M:%S")
-                print('INFO Changed disconnectTime format', disconnectTime)
-                bucket = event['bucket']
-                recordingKey = event['key']
-                
-                try:
-                    # Generate transcriptFileName
-                    transcriptFileName = recordingKey.replace(".wav",".json")
-                    transcriptFileName = transcriptFileName.replace("CallRecordings","CallTranscripts")
-                    print(transcriptFileName)
-                    
-                    transcribe_response = transcribe.get_transcription_job(TranscriptionJobName=jobName)
-                    
-                    print("Downloading transcript file")
-                    transcriptFileUri = transcribe_response['TranscriptionJob']['Transcript']['TranscriptFileUri']
-                    transcriptrequest = urllib2.Request(transcriptFileUri)
-                    transcriptFilereponse = urllib2.urlopen(transcriptrequest)
-                    transcriptFile_json = json.load(transcriptFilereponse) 
-                    
-                    #Add Amazon Connect ContactID and Disconenct Time generated from file name
-                    transcriptFile_json.update({'ContactId': contactId})
-                    transcriptFile_json.update({'DisconnectTimestamp': disconnectTime})
-                    
-                    # transcriptFile_binary = json.dumps(transcriptFile_json)
-                    
-                    print("Uploading transcript to S3 bucket")
-                    s3.put_object(Body=json.dumps(transcriptFile_json), Bucket=bucket, Key=transcriptFileName)
-                    
-                    return transcriptFileName
-                    
-                except Exception as e:
-                    print(e)
-                    message = 'Error !!!'
-                    print(message)
-                    raise Exception(message)
-
-                return 
-
+        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Key: voc-analytics/CopyTranscriptJobLambda_1-0-0.zip 
       Runtime: "python2.7"
       Timeout: "25"
+
+  AmazonConnectCallRecordingsS3events:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-S3eventtoSubmitTranscribeJob
+      Description: Task to attempt to submit an execution to state machine
+      Handler: "index.lambda_handler"
+      Role: !GetAtt [ LambdaExecutionRole, Arn ]
+      Code:
+        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Key: voc-analytics/AmazonConnectCallTranscription_1-0-0.zip
+      Environment:
+        Variables:
+          stateMachineArn: !Ref TranscribeJobStatusPollerStateMachine
+          stateMachineExecutionNamePrefix: !Ref stateMachineExecutionNamePrefixParameter
+          waittime: !Ref waitTimeParameter
+      Runtime: "python2.7"
+      Timeout: "25"
+
+  ComprehendEnricher:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-ComprehendEnricher'
+      Description: Task to attempt to enrich text assets with comprehend
+      Handler: "index.lambda_handler"
+      Role: !GetAtt [ LambdaExecutionRole, Arn ]
+      Code:
+        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Key: voc-analytics/ComprehendEnricher_1-0-0.zip
+      Environment:
+        Variables:
+          ENTITY_STREAM: !Ref DeliverystreamEntitiesFirehose
+          SENTIMENT_STREAM: !Ref DeliverystreamSentimentFirehose
+          PHRASES_STREAM: !Ref DeliverystreamKeyPhrasesFirehose
+      Runtime: "python2.7"
+      Timeout: "60" 
+
+  S3eventtoKinesis:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-S3eventtoComprehendEnricher'
+      Description: Task to attempt to send transcipt json to kinesis enrichment
+      Handler: "index.lambda_handler"
+      Role: !GetAtt [ LambdaExecutionRole, Arn ]
+      Code:
+        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Key: voc-analytics/S3EventToKDFH_1-0-0.zip
+      Environment:
+        Variables:
+          DeliveryStreamName: !Ref DeliverystreamComprehendEnricher     
+      Runtime: "python2.7"
+      Timeout: "60" 
+
+  DeliverystreamComprehendEnricher:
+    DependsOn:
+      - DeliveryPolicy
+    Type: 'AWS::KinesisFirehose::DeliveryStream'
+    Properties:
+      DeliveryStreamName: !Sub '${AWS::StackName}-comprehend-enricher'
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !Join 
+          - ''
+          - - 'arn:aws:s3:::'
+            - !Ref S3ConnectEnrichedbucket
+        BufferingHints:
+          IntervalInSeconds: '60'
+          SizeInMBs: '1'
+        CompressionFormat: UNCOMPRESSED
+        Prefix: EnrichedTranscripts/
+        RoleARN: !GetAtt DeliveryRole.Arn
+        ProcessingConfiguration:
+          Enabled: 'true'
+          Processors:
+            - Parameters:
+                - ParameterName: LambdaArn
+                  ParameterValue: !GetAtt ComprehendEnricher.Arn 
+              Type: Lambda 
+  
+  DeliverystreamEntitiesFirehose:
+      DependsOn:
+        - DeliveryPolicy
+      Type: 'AWS::KinesisFirehose::DeliveryStream'
+      Properties:
+        DeliveryStreamName: !Sub '${AWS::StackName}-comprehend-entities'
+        ExtendedS3DestinationConfiguration:
+          BucketARN: !Join 
+            - ''
+            - - 'arn:aws:s3:::'
+              - !Ref S3ConnectEnrichedbucket
+          BufferingHints:
+            IntervalInSeconds: '60'
+            SizeInMBs: '1'
+          CompressionFormat: UNCOMPRESSED
+          Prefix: EnrichedTranscripts/Entities/
+          RoleARN: !GetAtt DeliveryRole.Arn
+
+
+  DeliverystreamKeyPhrasesFirehose:
+      DependsOn:
+        - DeliveryPolicy
+      Type: 'AWS::KinesisFirehose::DeliveryStream'
+      Properties:
+        DeliveryStreamName: !Sub '${AWS::StackName}-comprehend-phrases'
+        ExtendedS3DestinationConfiguration:
+          BucketARN: !Join 
+            - ''
+            - - 'arn:aws:s3:::'
+              - !Ref S3ConnectEnrichedbucket
+          BufferingHints:
+            IntervalInSeconds: '60'
+            SizeInMBs: '1'
+          CompressionFormat: UNCOMPRESSED
+          Prefix: EnrichedTranscripts/Phrases/
+          RoleARN: !GetAtt DeliveryRole.Arn
+
+  DeliverystreamSentimentFirehose:
+      DependsOn:
+        - DeliveryPolicy
+      Type: 'AWS::KinesisFirehose::DeliveryStream'
+      Properties:
+        DeliveryStreamName: !Sub '${AWS::StackName}-comprehend-sentiment'
+        ExtendedS3DestinationConfiguration:
+          BucketARN: !Join 
+            - ''
+            - - 'arn:aws:s3:::'
+              - !Ref S3ConnectEnrichedbucket
+          BufferingHints:
+            IntervalInSeconds: '60'
+            SizeInMBs: '1'
+          CompressionFormat: UNCOMPRESSED
+          Prefix: EnrichedTranscripts/Sentiment/
+          RoleARN: !GetAtt DeliveryRole.Arn
+
+  DeliverystreamContactTraceRecords:
+      DependsOn:
+        - DeliveryPolicy
+      Type: 'AWS::KinesisFirehose::DeliveryStream'
+      Properties:
+        DeliveryStreamName: !Sub '${AWS::StackName}-connect-contacttracerecords'
+        ExtendedS3DestinationConfiguration:
+          BucketARN: !Join 
+            - ''
+            - - 'arn:aws:s3:::'
+              - !Ref S3ConnectEnrichedbucket
+          BufferingHints:
+            IntervalInSeconds: '60'
+            SizeInMBs: '1'
+          CompressionFormat: UNCOMPRESSED
+          Prefix: ContactTraceRecords/
+          RoleARN: !GetAtt DeliveryRole.Arn
+
+  S3ConnectEnrichedbucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-connect-enriched"
+      VersioningConfiguration:
+        Status: Enabled
+
+  AmazonConnectCallBucket:
+      Type: "AWS::S3::Bucket"
+      Properties: 
+        BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-connect"
+        # NotificationConfiguration:
+        #   LambdaConfigurations:
+        #     -
+        #       Function: !GetAtt AmazonConnectCallRecordingsS3events.Arn
+        #       Event: "s3:ObjectCreated:*"
+        #       Filter:
+        #         S3Key:
+        #           Rules:
+        #             -
+        #               Name: suffix
+        #               Value: .wav
+        #             - 
+        #               Name: prefix
+        #               Value: !Sub connect/${AmazonConnectInstanceAliasParameter}/CallRecordings  
+
+  S3TranscribeBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref AmazonConnectCallBucket
+      PolicyDocument:
+        Statement:
+          -
+            Action:
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource:
+              Fn::Join:
+                - ""
+                -
+                  - "arn:aws:s3:::"
+                  -
+                    Ref: "AmazonConnectCallBucket"
+                  - "/*"
+            Principal:
+              Service: 
+                - "transcribe.amazonaws.com"
+
+
+  DeliveryRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+  
+  DeliveryPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: firehose_Delivery_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: "*"
+            Resource: "*"
+      Roles:
+        - !Ref DeliveryRole
+
+  LambdaInvokePermissionS3event:
+      Type: "AWS::Lambda::Permission"
+      Properties:
+        FunctionName: !GetAtt S3eventtoKinesis.Arn
+        Action: "lambda:InvokeFunction"
+        Principal: "s3.amazonaws.com"
+        SourceArn: !GetAtt AmazonConnectCallBucket.Arn
+
+  LambdaInvokePermissionFirehoseTransformation:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !GetAtt ComprehendEnricher.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "firehose.amazonaws.com"
+      SourceArn: !GetAtt DeliverystreamComprehendEnricher.Arn
 
   StatesExecutionRole:
     Type: "AWS::IAM::Role"
@@ -298,3 +414,9 @@ Outputs:
   StateMachineArn:
     Value:
       Ref: TranscribeJobStatusPollerStateMachine
+  AmazonConnectCallRecordingBucket:
+    Value: 
+      Ref: AmazonConnectCallBucket
+  DeliverystreamContactTraceRecords:
+    Value: 
+      Ref: DeliverystreamContactTraceRecords
