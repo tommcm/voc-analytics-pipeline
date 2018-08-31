@@ -43,8 +43,7 @@ def lambda_handler(event, context):
             },
             Settings={ 
                 "MaxSpeakerLabels": 2,
-                "ShowSpeakerLabels": True,
-                "VocabularyName": "SummitDemoWords"
+                "ShowSpeakerLabels": True
             },
         )
         

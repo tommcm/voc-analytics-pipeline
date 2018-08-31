@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "An example job status poller template."
+Description: "This template deploys a Voice of the Customer demo."
 
 Parameters: 
   stateMachineExecutionNamePrefixParameter: 
@@ -14,7 +14,7 @@ Parameters:
       Type: String
       Default: sydney-summit
       Description: Enter the name of Amazon Connect Instance Alias (created manually as prereq)
-
+      
 Resources:
   LambdaExecutionRole:
     Type: "AWS::IAM::Role"
@@ -52,7 +52,7 @@ Resources:
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Bucket: !Sub tommcm-demo-us-east-1
         S3Key: voc-analytics/SubmitTranscribeJobLambda_1-0-0.zip
       Runtime: "python2.7"
       Timeout: "25"
@@ -64,7 +64,7 @@ Resources:
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Bucket: !Sub tommcm-demo-us-east-1
         S3Key: voc-analytics/CheckTranscribeJobLambda_1-0-0.zip        
       Runtime: "python2.7"
       Timeout: "25"
@@ -76,7 +76,7 @@ Resources:
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Bucket: !Sub tommcm-demo-us-east-1
         S3Key: voc-analytics/CopyTranscriptJobLambda_1-0-0.zip 
       Runtime: "python2.7"
       Timeout: "25"
@@ -89,7 +89,7 @@ Resources:
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Bucket: !Sub tommcm-demo-us-east-1
         S3Key: voc-analytics/AmazonConnectCallTranscription_1-0-0.zip
       Environment:
         Variables:
@@ -107,7 +107,7 @@ Resources:
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Bucket: !Sub tommcm-demo-us-east-1
         S3Key: voc-analytics/ComprehendEnricher_1-0-0.zip
       Environment:
         Variables:
@@ -125,7 +125,7 @@ Resources:
       Handler: "index.lambda_handler"
       Role: !GetAtt [ LambdaExecutionRole, Arn ]
       Code:
-        S3Bucket: !Sub tommcm-demo-${AWS::Region}
+        S3Bucket: !Sub tommcm-demo-us-east-1
         S3Key: voc-analytics/S3EventToKDFH_1-0-0.zip
       Environment:
         Variables:
@@ -234,28 +234,24 @@ Resources:
   S3ConnectEnrichedbucket:
     Type: 'AWS::S3::Bucket'
     Properties:
-      BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-connect-enriched"
-      VersioningConfiguration:
-        Status: Enabled
+      BucketName: !Sub "${AWS::StackName}-${AWS::Region}-connect-enriched"
 
   AmazonConnectCallBucket:
+      DependsOn: LambdaInvokePermissionS3event
       Type: "AWS::S3::Bucket"
       Properties: 
-        BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}-connect"
+        BucketName: !Sub ${AWS::StackName}-${AWS::Region}-connect
         # NotificationConfiguration:
         #   LambdaConfigurations:
-        #     -
-        #       Function: !GetAtt AmazonConnectCallRecordingsS3events.Arn
+        #     - Function: !GetAtt AmazonConnectCallRecordingsS3events.Arn
         #       Event: "s3:ObjectCreated:*"
-        #       Filter:
-        #         S3Key:
-        #           Rules:
-        #             -
-        #               Name: suffix
-        #               Value: .wav
-        #             - 
-        #               Name: prefix
-        #               Value: !Sub connect/${AmazonConnectInstanceAliasParameter}/CallRecordings  
+              # Filter:
+              #   S3Key:
+              #     Rules:
+              #       - Name: suffix
+              #         Value: .wav
+              #       - Name: prefix
+              #         Value: !Sub connect/${AmazonConnectInstanceAliasParameter}/CallRecordings  
 
   S3TranscribeBucketPolicy:
     Type: "AWS::S3::BucketPolicy"
@@ -314,7 +310,8 @@ Resources:
         FunctionName: !GetAtt S3eventtoKinesis.Arn
         Action: "lambda:InvokeFunction"
         Principal: "s3.amazonaws.com"
-        SourceArn: !GetAtt AmazonConnectCallBucket.Arn
+        SourceArn: !Sub "arn:aws:s3:::${AWS::StackName}-${AWS::Region}-connect"
+        
 
   LambdaInvokePermissionFirehoseTransformation:
     Type: "AWS::Lambda::Permission"
